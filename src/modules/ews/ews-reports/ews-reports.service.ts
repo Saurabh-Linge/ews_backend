@@ -1,6 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../../../core/database/database.service';
 
+/** Helper to parse array / comma-separated filter values into a clean string array */
+function parseArrayFilter(val: any): string[] {
+  if (!val) return [];
+  let arr: string[] = [];
+  if (Array.isArray(val)) {
+    arr = val.map(v => String(v).trim());
+  } else if (typeof val === 'string') {
+    arr = val.split(',').map(v => v.trim());
+  } else {
+    arr = [String(val).trim()];
+  }
+  return arr.filter(v => v && v.toLowerCase() !== 'all');
+}
+
 @Injectable()
 export class EwsReportsService {
   private readonly logger = new Logger(EwsReportsService.name);
@@ -11,8 +25,8 @@ export class EwsReportsService {
   // REPORT 02 — ACCOUNT SIGNAL DETAIL REPORT
   // ──────────────────────────────────────────────────────────────────────────
   async getAccountSignalDetailReport(filters?: {
-    branch?: string;
-    risk_level?: string;
+    branch?: any;
+    risk_level?: any;
     product?: string;
     search?: string;
     min_amount?: number;
@@ -21,9 +35,10 @@ export class EwsReportsService {
     const params: any[] = [];
     let whereClauses: string[] = [];
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereClauses.push(`branch_code = $${params.length}`);
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereClauses.push(`branch_code = ANY($${params.length}::varchar[])`);
     }
 
     if (filters?.product && filters.product !== 'all') {
@@ -43,6 +58,13 @@ export class EwsReportsService {
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const limitVal = filters?.limit ? Math.min(Number(filters.limit), 2000) : 500;
+
+    const riskLevels = parseArrayFilter(filters?.risk_level).map(r => r.toUpperCase());
+    let riskFilterSql = '';
+    if (riskLevels.length > 0) {
+      params.push(riskLevels);
+      riskFilterSql = `WHERE overall_risk = ANY($${params.length}::varchar[])`;
+    }
 
     const query = `
       WITH account_flags AS (
@@ -98,7 +120,7 @@ export class EwsReportsService {
       )
       SELECT *
       FROM evaluated
-      ${filters?.risk_level && filters.risk_level !== 'all' ? `WHERE overall_risk = '${filters.risk_level.toUpperCase()}'` : ''}
+      ${riskFilterSql}
       ORDER BY principal_os DESC
       LIMIT ${limitVal}
     `;
@@ -110,13 +132,14 @@ export class EwsReportsService {
   // ──────────────────────────────────────────────────────────────────────────
   // REPORT 04 — BRANCH-WISE EWS SUMMARY
   // ──────────────────────────────────────────────────────────────────────────
-  async getBranchWiseSummaryReport(filters?: { branch?: string }) {
+  async getBranchWiseSummaryReport(filters?: { branch?: any }) {
     const params: any[] = [];
     let whereSql = '';
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereSql = `WHERE d.branch_code = $1`;
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereSql = `WHERE d.branch_code = ANY($1::varchar[])`;
     }
 
     const query = `
@@ -155,18 +178,18 @@ export class EwsReportsService {
   // ──────────────────────────────────────────────────────────────────────────
   // REPORT 05 — SIGNAL-WISE DISTRIBUTION
   // ──────────────────────────────────────────────────────────────────────────
-  async getSignalWiseDistributionReport(filters?: { branch?: string }) {
+  async getSignalWiseDistributionReport(filters?: { branch?: any }) {
     const params: any[] = [];
     let whereSql = '';
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereSql = `WHERE branch_code = $1`;
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereSql = `WHERE branch_code = ANY($1::varchar[])`;
     }
 
     const query = `
       SELECT
-        -- Total portfolio for %
         COUNT(*)::INT as total_portfolio,
         -- Signal 1
         COUNT(*) FILTER (WHERE UPPER(TRIM(npa)) = 'Y')::INT as s1_total,
@@ -301,13 +324,14 @@ export class EwsReportsService {
   // ──────────────────────────────────────────────────────────────────────────
   // REPORT 06 — LOAN TYPE / PRODUCT RISK REPORT
   // ──────────────────────────────────────────────────────────────────────────
-  async getLoanTypeRiskReport(filters?: { branch?: string; search?: string }) {
+  async getLoanTypeRiskReport(filters?: { branch?: any; search?: string }) {
     const params: any[] = [];
     let whereClauses: string[] = [];
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereClauses.push(`branch_code = $${params.length}`);
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereClauses.push(`branch_code = ANY($${params.length}::varchar[])`);
     }
 
     if (filters?.search && filters.search.trim()) {
@@ -352,8 +376,8 @@ export class EwsReportsService {
   // REPORT 07 — CRO EXECUTIVE DASHBOARD REPORT
   // ──────────────────────────────────────────────────────────────────────────
   async getCroDashboardReport(filters?: {
-    branch?: string;
-    rating?: string;
+    branch?: any;
+    rating?: any;
     search?: string;
     min_amount?: number;
     limit?: number;
@@ -361,14 +385,16 @@ export class EwsReportsService {
     const params: any[] = [];
     let whereClauses: string[] = [];
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereClauses.push(`branch_code = $${params.length}`);
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereClauses.push(`branch_code = ANY($${params.length}::varchar[])`);
     }
 
-    if (filters?.rating && filters.rating !== 'all') {
-      params.push(filters.rating);
-      whereClauses.push(`bank_cust_rating = $${params.length}`);
+    const ratings = parseArrayFilter(filters?.rating);
+    if (ratings.length > 0) {
+      params.push(ratings);
+      whereClauses.push(`bank_cust_rating = ANY($${params.length}::varchar[])`);
     }
 
     if (filters?.search && filters.search.trim()) {
@@ -457,13 +483,14 @@ export class EwsReportsService {
   // ──────────────────────────────────────────────────────────────────────────
   // REPORT 09 — RBI / IRAC COMPLIANCE REPORT
   // ──────────────────────────────────────────────────────────────────────────
-  async getRbiComplianceReport(filters?: { branch?: string }) {
+  async getRbiComplianceReport(filters?: { branch?: any }) {
     const params: any[] = [];
     let whereSql = '';
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereSql = `WHERE branch_code = $1`;
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereSql = `WHERE branch_code = ANY($1::varchar[])`;
     }
 
     const totalPortfolioRes = await this.db.query(
@@ -552,15 +579,16 @@ export class EwsReportsService {
   // ──────────────────────────────────────────────────────────────────────────
   // REPORT 10 — STOCK / SECURITY INSPECTION DUE REPORT
   // ──────────────────────────────────────────────────────────────────────────
-  async getInspectionDueReport(filters?: { branch?: string; status?: string; search?: string }) {
+  async getInspectionDueReport(filters?: { branch?: any; status?: any; search?: string }) {
     const params: any[] = [];
     let whereClauses: string[] = [
       `(product_code = '1233' OR product_desc ILIKE '%CASH CREDIT%')`,
     ];
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereClauses.push(`branch_code = $${params.length}`);
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereClauses.push(`branch_code = ANY($${params.length}::varchar[])`);
     }
 
     if (filters?.search && filters.search.trim()) {
@@ -593,8 +621,9 @@ export class EwsReportsService {
     const res = await this.db.query(query, params);
     let rows = res.rows;
 
-    if (filters?.status && filters.status !== 'all') {
-      rows = rows.filter((r) => r.inspection_status === filters.status);
+    const statuses = parseArrayFilter(filters?.status).map(s => s.toUpperCase());
+    if (statuses.length > 0) {
+      rows = rows.filter((r) => statuses.includes(r.inspection_status.toUpperCase()));
     }
 
     return rows;
@@ -604,23 +633,28 @@ export class EwsReportsService {
   // REPORT 11 — INSURANCE RENEWAL DUE REPORT
   // ──────────────────────────────────────────────────────────────────────────
   async getInsuranceRenewalReport(filters?: {
-    branch?: string;
-    status?: string;
-    insurer?: string;
+    branch?: any;
+    status?: any;
+    insurer?: any;
     search?: string;
     limit?: number;
   }) {
     const params: any[] = [];
     let whereClauses: string[] = [`policy_due_date IS NOT NULL`];
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereClauses.push(`branch_code = $${params.length}`);
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereClauses.push(`branch_code = ANY($${params.length}::varchar[])`);
     }
 
-    if (filters?.insurer && filters.insurer !== 'all') {
-      params.push(`%${filters.insurer}%`);
-      whereClauses.push(`insurance_company ILIKE $${params.length}`);
+    const insurers = parseArrayFilter(filters?.insurer);
+    if (insurers.length > 0) {
+      const insurerClauses = insurers.map(ins => {
+        params.push(`%${ins}%`);
+        return `insurance_company ILIKE $${params.length}`;
+      });
+      whereClauses.push(`(${insurerClauses.join(' OR ')})`);
     }
 
     if (filters?.search && filters.search.trim()) {
@@ -679,19 +713,24 @@ export class EwsReportsService {
     ];
 
     // 2. Accounts List
-    let statusFilterSql = '';
-    if (filters?.status && filters.status !== 'all') {
-      if (filters.status === 'LAPSED') {
-        statusFilterSql = `AND policy_due_date < CURRENT_DATE`;
-      } else if (filters.status === 'DUE ≤ 30 DAYS' || filters.status === 'DUE <= 30 DAYS') {
-        statusFilterSql = `AND policy_due_date >= CURRENT_DATE AND policy_due_date <= CURRENT_DATE + INTERVAL '30 days'`;
-      } else if (filters.status === 'DUE ≤ 90 DAYS' || filters.status === 'DUE <= 90 DAYS') {
-        statusFilterSql = `AND policy_due_date > CURRENT_DATE + INTERVAL '30 days' AND policy_due_date <= CURRENT_DATE + INTERVAL '90 days'`;
-      } else if (filters.status === 'CURRENT') {
-        statusFilterSql = `AND policy_due_date > CURRENT_DATE + INTERVAL '90 days'`;
+    const statuses = parseArrayFilter(filters?.status).map(st => st.toUpperCase());
+    let statusFilterParts: string[] = [];
+    if (statuses.length > 0) {
+      if (statuses.some(st => st.includes('LAPSED'))) {
+        statusFilterParts.push(`policy_due_date < CURRENT_DATE`);
+      }
+      if (statuses.some(st => st.includes('30'))) {
+        statusFilterParts.push(`(policy_due_date >= CURRENT_DATE AND policy_due_date <= CURRENT_DATE + INTERVAL '30 days')`);
+      }
+      if (statuses.some(st => st.includes('90'))) {
+        statusFilterParts.push(`(policy_due_date > CURRENT_DATE + INTERVAL '30 days' AND policy_due_date <= CURRENT_DATE + INTERVAL '90 days')`);
+      }
+      if (statuses.some(st => st === 'CURRENT')) {
+        statusFilterParts.push(`policy_due_date > CURRENT_DATE + INTERVAL '90 days'`);
       }
     }
 
+    const statusFilterSql = statusFilterParts.length > 0 ? `AND (${statusFilterParts.join(' OR ')})` : '';
     const limitVal = filters?.limit ? Math.min(Number(filters.limit), 2000) : 300;
 
     const accountsQuery = `
@@ -730,21 +769,26 @@ export class EwsReportsService {
   // ──────────────────────────────────────────────────────────────────────────
   // REPORT 12 — CERSAI PENDENCY REPORT
   // ──────────────────────────────────────────────────────────────────────────
-  async getCersaiPendencyReport(filters?: { branch?: string; security_type?: string; search?: string; limit?: number }) {
+  async getCersaiPendencyReport(filters?: { branch?: any; security_type?: any; search?: string; limit?: number }) {
     const params: any[] = [];
     let whereClauses: string[] = [
       `(security_type ILIKE '%MORTGAGE%' OR security_type ILIKE '%LAND%' OR security_type ILIKE '%BUILDING%' OR security_type ILIKE '%FLAT%' OR security_type ILIKE '%BUNGLOW%')`,
       `(cersai_charge_noted IS NULL OR TRIM(UPPER(cersai_charge_noted)) != 'YES')`,
     ];
 
-    if (filters?.branch && filters.branch !== 'all') {
-      params.push(filters.branch);
-      whereClauses.push(`branch_code = $${params.length}`);
+    const branches = parseArrayFilter(filters?.branch);
+    if (branches.length > 0) {
+      params.push(branches);
+      whereClauses.push(`branch_code = ANY($${params.length}::varchar[])`);
     }
 
-    if (filters?.security_type && filters.security_type !== 'all') {
-      params.push(`%${filters.security_type}%`);
-      whereClauses.push(`security_type ILIKE $${params.length}`);
+    const secTypes = parseArrayFilter(filters?.security_type);
+    if (secTypes.length > 0) {
+      const typeClauses = secTypes.map(t => {
+        params.push(`%${t}%`);
+        return `security_type ILIKE $${params.length}`;
+      });
+      whereClauses.push(`(${typeClauses.join(' OR ')})`);
     }
 
     if (filters?.search && filters.search.trim()) {
