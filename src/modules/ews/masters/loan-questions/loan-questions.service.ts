@@ -11,7 +11,14 @@ export class LoanQuestionsService {
     private readonly cbsRules: CbsRulesService,
   ) {}
 
-  async findAll() {
+  async findAll(category?: string) {
+    if (category && category !== 'All') {
+      const res = await this.db.query(
+        'SELECT * FROM ews_loan_questions WHERE LOWER(category) = LOWER($1) ORDER BY id ASC',
+        [category]
+      );
+      return res.rows;
+    }
     const res = await this.db.query('SELECT * FROM ews_loan_questions ORDER BY id ASC');
     return res.rows;
   }
@@ -24,21 +31,23 @@ export class LoanQuestionsService {
 
   async create(data: any) {
     const isActive = data.is_active !== undefined ? data.is_active : true;
+    const category = data.category || 'Commercial';
     const res = await this.db.query(
-      `INSERT INTO ews_loan_questions (question_desc, type, options, reference_name, loan_products, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [data.question_desc, data.type, JSON.stringify(data.options || []), data.reference_name, JSON.stringify(data.loan_products || []), isActive]
+      `INSERT INTO ews_loan_questions (question_desc, type, options, reference_name, loan_products, is_active, category)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [data.question_desc, data.type, JSON.stringify(data.options || []), data.reference_name, JSON.stringify(data.loan_products || []), isActive, category]
     );
     return res.rows[0];
   }
 
   async update(id: number, data: any) {
     const isActive = data.is_active !== undefined ? data.is_active : true;
+    const category = data.category || 'Commercial';
     const res = await this.db.query(
       `UPDATE ews_loan_questions
-       SET question_desc = $1, type = $2, options = $3, reference_name = $4, loan_products = $5, is_active = $6, updated_at = NOW()
-       WHERE id = $7 RETURNING *`,
-      [data.question_desc, data.type, JSON.stringify(data.options || []), data.reference_name, JSON.stringify(data.loan_products || []), isActive, id]
+       SET question_desc = $1, type = $2, options = $3, reference_name = $4, loan_products = $5, is_active = $6, category = $7, updated_at = NOW()
+       WHERE id = $8 RETURNING *`,
+      [data.question_desc, data.type, JSON.stringify(data.options || []), data.reference_name, JSON.stringify(data.loan_products || []), isActive, category, id]
     );
     if (res.rowCount === 0) throw new NotFoundException('Question not found');
     return res.rows[0];
@@ -54,7 +63,7 @@ export class LoanQuestionsService {
    * Get questions for account. Accepts account_id string (e.g "AJR001").
    * Also fetches existing saved answers using the dump row id.
    */
-  async getByAccountStr(accountStr: string) {
+  async getByAccountStr(accountStr: string, category?: string) {
     // Resolve dump row
     const accRes = await this.db.query(
       'SELECT id, scheme_desc FROM ews_loan_dump WHERE account_id = $1 ORDER BY id DESC LIMIT 1',
@@ -63,35 +72,42 @@ export class LoanQuestionsService {
     const dumpRow = accRes.rows[0];
     const dumpId = dumpRow?.id ?? null;
     const schemeDesc = dumpRow?.scheme_desc ?? null;
-    return this.fetchQuestions(dumpId, schemeDesc);
+    return this.fetchQuestions(dumpId, schemeDesc, category);
   }
 
   /**
    * Get questions for a dump row by numeric dump ID.
    */
-  async getForAccount(dumpId: number) {
+  async getForAccount(dumpId: number, category?: string) {
     const accRes = await this.db.query(
       'SELECT id, scheme_desc FROM ews_loan_dump WHERE id = $1',
       [dumpId]
     );
     if (accRes.rowCount === 0) throw new NotFoundException('Account not found');
     const schemeDesc = accRes.rows[0].scheme_desc;
-    return this.fetchQuestions(dumpId, schemeDesc);
+    return this.fetchQuestions(dumpId, schemeDesc, category);
   }
 
-  private async fetchQuestions(dumpId: number | null, schemeDesc: string | null) {
-    const qRes = await this.db.query(
-      `SELECT 
-          q.id, q.question_desc, q.type, q.options, q.reference_name, q.is_active, q.loan_products,
+  private async fetchQuestions(dumpId: number | null, schemeDesc: string | null, category?: string) {
+    let query = `
+      SELECT 
+          q.id, q.question_desc, q.type, q.options, q.reference_name, q.is_active, q.loan_products, q.category,
           a.answer_value
        FROM ews_loan_questions q
        LEFT JOIN ews_account_question_answers a 
          ON a.question_id = q.id 
          AND a.account_id = $1
-       WHERE q.is_active = true 
-       ORDER BY q.id ASC`,
-      [dumpId]
-    );
+       WHERE q.is_active = true`;
+    const params: any[] = [dumpId];
+
+    if (category && category !== 'All') {
+      params.push(category);
+      query += ` AND LOWER(q.category) = LOWER($${params.length})`;
+    }
+
+    query += ` ORDER BY q.id ASC`;
+
+    const qRes = await this.db.query(query, params);
 
     // Filter by loan product in JS to avoid JSONB operator type-casting issues
     return qRes.rows.filter((q: any) => {

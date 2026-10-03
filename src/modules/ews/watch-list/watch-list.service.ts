@@ -189,6 +189,16 @@ export class WatchListService {
     );
     if (!accountDetails.rows[0]) throw new NotFoundException('Account not found');
     const account = accountDetails.rows[0];
+
+    // If account is on watch list, delegate to getDetails to return full signals, timeline, etc.
+    const wl = await this.db.query(
+      `SELECT id FROM ews_watch_list WHERE account_id = $1`,
+      [account.account_id]
+    );
+    if (wl.rows[0]) {
+      return this.getDetails(wl.rows[0].id);
+    }
+
     account.status = 'Normal';
 
     return {

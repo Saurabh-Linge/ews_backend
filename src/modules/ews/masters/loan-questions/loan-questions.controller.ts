@@ -8,26 +8,26 @@ export class LoanQuestionsController {
 
   // ── List all (admin) ──────────────────────────────────────────
   @Get()
-  findAll() { return this.service.findAll(); }
+  findAll(@Query('category') category?: string) { return this.service.findAll(category); }
 
   // ── Specific named routes MUST come before :id wildcard ───────
 
   /**
-   * GET /ews/loan-questions/for-account?account_id=AJR001
+   * GET /ews/loan-questions/for-account?account_id=AJR001&category=retail
    * Returns active questions + saved answers for an account (by account_id string)
    */
   @Get('for-account')
-  getForAccount(@Query('account_id') accountId: string) {
-    return this.service.getByAccountStr(accountId);
+  getForAccount(@Query('account_id') accountId: string, @Query('category') category?: string) {
+    return this.service.getByAccountStr(accountId, category);
   }
 
   /**
-   * GET /ews/loan-questions/for-dump/:dumpId
+   * GET /ews/loan-questions/for-dump/:dumpId?category=retail
    * Returns active questions + saved answers for an account (by dump numeric id)
    */
   @Get('for-dump/:dumpId')
-  getForDump(@Param('dumpId') dumpId: string) {
-    return this.service.getForAccount(+dumpId);
+  getForDump(@Param('dumpId') dumpId: string, @Query('category') category?: string) {
+    return this.service.getForAccount(+dumpId, category);
   }
 
   /**
